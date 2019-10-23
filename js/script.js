@@ -1,106 +1,281 @@
-const resolver = {
-  resolve: function resolve(options, callback) {
-    // The string to resolve
-    const resolveString = options.resolveString || options.element.getAttribute('data-target-resolver');
-    const combinedOptions = Object.assign({}, options, { resolveString: resolveString });
+$(function() {
+	// Vars
+	var pointsA = [],
+		pointsB = [],
+		$canvas = null,
+		canvas = null,
+		context = null,
+		vars = null,
+		points = 8,
+		viscosity = 20,
+		mouseDist = 70,
+		damping = 0.05,
+		showIndicators = false;
+		mouseX = 0,
+		mouseY = 0,
+		relMouseX = 0,
+		relMouseY = 0,
+		mouseLastX = 0,
+		mouseLastY = 0,
+		mouseDirectionX = 0,
+		mouseDirectionY = 0,
+		mouseSpeedX = 0,
+		mouseSpeedY = 0;
 
-    function getRandomInteger(min, max) {
-      return Math.floor(Math.random() * (max - min + 1)) + min;
-    };
+	/**
+	 * Get mouse direction
+	 */
+	function mouseDirection(e) {
+		if (mouseX < e.pageX)
+			mouseDirectionX = 1;
+		else if (mouseX > e.pageX)
+			mouseDirectionX = -1;
+		else
+			mouseDirectionX = 0;
 
-    function randomCharacter(characters) {
-      return characters[getRandomInteger(0, characters.length - 1)];
-    };
+		if (mouseY < e.pageY)
+			mouseDirectionY = 1;
+		else if (mouseY > e.pageY)
+			mouseDirectionY = -1;
+		else
+			mouseDirectionY = 0;
 
-    function doRandomiserEffect(options, callback) {
-      const characters = options.characters;
-      const timeout = options.timeout;
-      const element = options.element;
-      const partialString = options.partialString;
+		mouseX = e.pageX;
+		mouseY = e.pageY;
 
-      let iterations = options.iterations;
+		relMouseX = (mouseX - $canvas.offset().left);
+		relMouseY = (mouseY - $canvas.offset().top);
+	}
+	$(document).on('mousemove', mouseDirection);
 
-      setTimeout(() => {
-        if (iterations >= 0) {
-          const nextOptions = Object.assign({}, options, { iterations: iterations - 1 });
+	/**
+	 * Get mouse speed
+	 */
+	function mouseSpeed() {
+		mouseSpeedX = mouseX - mouseLastX;
+		mouseSpeedY = mouseY - mouseLastY;
 
-          // Ensures partialString without the random character as the final state.
-          if (iterations === 0) {
-            element.textContent = partialString;
-          } else {
-            // Replaces the last character of partialString with a random character
-            element.textContent = partialString.substring(0, partialString.length - 1) + randomCharacter(characters);
-          }
+		mouseLastX = mouseX;
+		mouseLastY = mouseY;
 
-          doRandomiserEffect(nextOptions, callback);
-        } else if (typeof callback === "function") {
-          callback();
-        }
-      }, options.timeout);
-    };
+		setTimeout(mouseSpeed, 50);
+	}
+	mouseSpeed();
 
-    function doResolverEffect(options, callback) {
-      const resolveString = options.resolveString;
-      const characters = options.characters;
-      const offset = options.offset;
-      const partialString = resolveString.substring(0, offset);
-      const combinedOptions = Object.assign({}, options, { partialString: partialString });
+	/**
+	 * Init button
+	 */
+	function initButton() {
+		// Get button
+		var button = $('.btn-liquid');
+		var buttonWidth = button.width();
+		var buttonHeight = button.height();
 
-      doRandomiserEffect(combinedOptions, () => {
-        const nextOptions = Object.assign({}, options, { offset: offset + 1 });
+		// Create canvas
+		$canvas = $('<canvas></canvas>');
+		button.append($canvas);
 
-        if (offset <= resolveString.length) {
-          doResolverEffect(nextOptions, callback);
-        } else if (typeof callback === "function") {
-          callback();
-        }
-      });
-    };
+		canvas = $canvas.get(0);
+		canvas.width = buttonWidth+100;
+		canvas.height = buttonHeight+100;
+		context = canvas.getContext('2d');
 
-    doResolverEffect(combinedOptions, callback);
-  }
+		// Add points
+
+		var x = buttonHeight/2;
+		for(var j = 1; j < points; j++) {
+			addPoints((x+((buttonWidth-buttonHeight)/points)*j), 0);
+		}
+		addPoints(buttonWidth-buttonHeight/5, 0);
+		addPoints(buttonWidth+buttonHeight/10, buttonHeight/2);
+		addPoints(buttonWidth-buttonHeight/5, buttonHeight);
+		for(var j = points-1; j > 0; j--) {
+			addPoints((x+((buttonWidth-buttonHeight)/points)*j), buttonHeight);
+		}
+		addPoints(buttonHeight/5, buttonHeight);
+
+		addPoints(-buttonHeight/10, buttonHeight/2);
+		addPoints(buttonHeight/5, 0);
+		// addPoints(x, 0);
+		// addPoints(0, buttonHeight/2);
+
+		// addPoints(0, buttonHeight/2);
+		// addPoints(buttonHeight/4, 0);
+
+		// Start render
+		renderCanvas();
+	}
+
+	/**
+	 * Add points
+	 */
+	function addPoints(x, y) {
+		pointsA.push(new Point(x, y, 1));
+		pointsB.push(new Point(x, y, 2));
+	}
+
+	/**
+	 * Point
+	 */
+	function Point(x, y, level) {
+	  this.x = this.ix = 50+x;
+	  this.y = this.iy = 50+y;
+	  this.vx = 0;
+	  this.vy = 0;
+	  this.cx1 = 0;
+	  this.cy1 = 0;
+	  this.cx2 = 0;
+	  this.cy2 = 0;
+	  this.level = level;
+	}
+
+	Point.prototype.move = function() {
+		this.vx += (this.ix - this.x) / (viscosity*this.level);
+		this.vy += (this.iy - this.y) / (viscosity*this.level);
+
+		var dx = this.ix - relMouseX,
+			dy = this.iy - relMouseY;
+		var relDist = (1-Math.sqrt((dx * dx) + (dy * dy))/mouseDist);
+
+		// Move x
+		if ((mouseDirectionX > 0 && relMouseX > this.x) || (mouseDirectionX < 0 && relMouseX < this.x)) {
+			if (relDist > 0 && relDist < 1) {
+				this.vx = (mouseSpeedX / 4) * relDist;
+			}
+		}
+		this.vx *= (1 - damping);
+		this.x += this.vx;
+
+		// Move y
+		if ((mouseDirectionY > 0 && relMouseY > this.y) || (mouseDirectionY < 0 && relMouseY < this.y)) {
+			if (relDist > 0 && relDist < 1) {
+				this.vy = (mouseSpeedY / 4) * relDist;
+			}
+		}
+		this.vy *= (1 - damping);
+		this.y += this.vy;
+	};
 
 
-  /* Some GLaDOS quotes from Portal 2 chapter 9: The Part Where He Kills You
-     * Source: http://theportalwiki.com/wiki/GLaDOS_voice_lines#Chapter_9:_The_Part_Where_He_Kills_You
-     */ };
-const strings = [
-'Nox AI Studio',
-'......',
-'Transforming data',
- 'into information',
-];
+	/**
+	 * Render canvas
+	 */
+	function renderCanvas() {
+		// rAF
+		rafID = requestAnimationFrame(renderCanvas);
 
+		// Clear scene
+		context.clearRect(0, 0, $canvas.width(), $canvas.height());
+		context.fillStyle = '#fff';
+		context.fillRect(0, 0, $canvas.width(), $canvas.height());
 
-let counter = 0;
+		// Move points
+		for (var i = 0; i <= pointsA.length - 1; i++) {
+			pointsA[i].move();
+			pointsB[i].move();
+		}
 
-const options = {
-  // Initial position
-  offset: 0,
-  // Timeout between each random character
-  timeout: 5,
-  // Number of random characters to show
-  iterations: 15,
-  // Random characters to pick from
-  characters: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'x', 'y', 'x', '#', '%', '&', '-', '+', '_', '?', '/', '\\', '='],
-  // String to resolve
-  resolveString: strings[counter],
-  // The element
-  element: document.querySelector('[data-target-resolver]')
+		// Create dynamic gradient
+		var gradientX = Math.min(Math.max(mouseX - $canvas.offset().left, 0), $canvas.width());
+		var gradientY = Math.min(Math.max(mouseY - $canvas.offset().top, 0), $canvas.height());
+		var distance = Math.sqrt(Math.pow(gradientX - $canvas.width()/2, 2) + Math.pow(gradientY - $canvas.height()/2, 2)) / Math.sqrt(Math.pow($canvas.width()/2, 2) + Math.pow($canvas.height()/2, 2));
 
+		var gradient = context.createRadialGradient(gradientX, gradientY, 300+(300*distance), gradientX, gradientY, 0);
+		gradient.addColorStop(0, '#102ce5');
+		gradient.addColorStop(1, '#E406D6');
 
-  // Callback function when resolve completes
-};function callback() {
-  setTimeout(() => {
-    counter++;
+		// Draw shapes
+		var groups = [pointsA, pointsB]
 
-    if (counter >= strings.length) {
-      counter = 0;
-    }
+		for (var j = 0; j <= 1; j++) {
+			var points = groups[j];
 
-    let nextOptions = Object.assign({}, options, { resolveString: strings[counter] });
-    resolver.resolve(nextOptions, callback);
-  }, 1000);
-}
+			if (j == 0) {
+				// Background style
+				context.fillStyle = '#1CE2D8';
+			} else {
+				// Foreground style
+				context.fillStyle = gradient;
+			}
 
-resolver.resolve(options, callback);
+			context.beginPath();
+			context.moveTo(points[0].x, points[0].y);
+
+			for (var i = 0; i < points.length; i++) {
+				var p = points[i];
+				var nextP = points[i + 1];
+				var val = 30*0.552284749831;
+
+				if (nextP != undefined) {
+					// if (nextP.ix > p.ix && nextP.iy < p.iy) {
+					// 	p.cx1 = p.x;
+					// 	p.cy1 = p.y-val;
+					// 	p.cx2 = nextP.x-val;
+					// 	p.cy2 = nextP.y;
+					// } else if (nextP.ix > p.ix && nextP.iy > p.iy) {
+					// 	p.cx1 = p.x+val;
+					// 	p.cy1 = p.y;
+					// 	p.cx2 = nextP.x;
+					// 	p.cy2 = nextP.y-val;
+					// }  else if (nextP.ix < p.ix && nextP.iy > p.iy) {
+					// 	p.cx1 = p.x;
+					// 	p.cy1 = p.y+val;
+					// 	p.cx2 = nextP.x+val;
+					// 	p.cy2 = nextP.y;
+					// } else if (nextP.ix < p.ix && nextP.iy < p.iy) {
+					// 	p.cx1 = p.x-val;
+					// 	p.cy1 = p.y;
+					// 	p.cx2 = nextP.x;
+					// 	p.cy2 = nextP.y+val;
+					// } else {
+
+						p.cx1 = (p.x+nextP.x)/2;
+						p.cy1 = (p.y+nextP.y)/2;
+						p.cx2 = (p.x+nextP.x)/2;
+						p.cy2 = (p.y+nextP.y)/2;
+
+						context.bezierCurveTo(p.x, p.y, p.cx1, p.cy1, p.cx1, p.cy1);
+					// 	continue;
+					// }
+
+					// context.bezierCurveTo(p.cx1, p.cy1, p.cx2, p.cy2, nextP.x, nextP.y);
+				} else {
+nextP = points[0];
+						p.cx1 = (p.x+nextP.x)/2;
+						p.cy1 = (p.y+nextP.y)/2;
+
+						context.bezierCurveTo(p.x, p.y, p.cx1, p.cy1, p.cx1, p.cy1);
+				}
+			}
+
+			// context.closePath();
+			context.fill();
+		}
+
+		if (showIndicators) {
+			// Draw points
+			context.fillStyle = '#000';
+			context.beginPath();
+			for (var i = 0; i < pointsA.length; i++) {
+				var p = pointsA[i];
+
+				context.rect(p.x - 1, p.y - 1, 2, 2);
+			}
+			context.fill();
+
+			// Draw controls
+			context.fillStyle = '#f00';
+			context.beginPath();
+			for (var i = 0; i < pointsA.length; i++) {
+				var p = pointsA[i];
+
+				context.rect(p.cx1 - 1, p.cy1 - 1, 2, 2);
+				context.rect(p.cx2 - 1, p.cy2 - 1, 2, 2);
+			}
+			context.fill();
+		}
+	}
+
+	// Init
+	initButton();
+});
